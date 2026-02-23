@@ -91,3 +91,12 @@ class SimGCL_Encoder(nn.Module):
         all_embeddings = torch.mean(all_embeddings, dim=1)
         user_all_embeddings, item_all_embeddings = torch.split(all_embeddings, [self.data.user_num, self.data.item_num])
         return user_all_embeddings, item_all_embeddings
+
+    def cal_cl_loss(self, idx):
+        u_idx = torch.unique(torch.Tensor(idx[0]).type(torch.long)).cuda()
+        i_idx = torch.unique(torch.Tensor(idx[1]).type(torch.long)).cuda()
+        user_view_1, item_view_1 = self.forward(perturbed=True)
+        user_view_2, item_view_2 = self.forward(perturbed=True)
+        user_cl_loss = InfoNCE(user_view_1[u_idx], user_view_2[u_idx], 0.2)
+        item_cl_loss = InfoNCE(item_view_1[i_idx], item_view_2[i_idx], 0.2)
+        return user_cl_loss + item_cl_loss

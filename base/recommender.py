@@ -46,8 +46,11 @@ class Recommender:
         model_name = self.config['model']['name']
         if self.config.contain(model_name):
             args = self.config[model_name]
-            parStr = '  '.join(f"{key}:{args[key]}" for key in args)
-            print('Specific parameters:', parStr)
+            if isinstance(args, str):
+                print('Specific parameters:', args)
+            else:
+                parStr = '  '.join(f"{key}:{args[key]}" for key in args)
+                print('Specific parameters:', parStr)
 
     def build(self):
         pass
