@@ -2,7 +2,7 @@ training.set: ./dataset/yelp2018/train.txt
 test.set: ./dataset/yelp2018/test.txt
 
 model:
-  name: PT4Rec
+  name: PT4Rec_Pop
   type: graph
 
 item.ranking.topN: [10,20]
@@ -13,8 +13,6 @@ batch.size: 2048
 learning.rate: 0.001
 reg.lambda: 0.0001
 num.max.preepoch: 20
-# Note: PT4Rec code might look for 'CPMP' key if I don't change the code. 
-# But I will change the code in PT4Rec.py to look for 'PT4Rec'
-PT4Rec: -n_layer 2  -temp 0.2 -prompt_size 64 -user_prompt_num 3  -pretrain_model SimGCL
+PT4Rec_Pop: -n_layer 2 -temp 0.2 -prompt_size 64 -user_prompt_num 3 -pretrain_model SimGCL -gamma 0.1 -top_k 100
 
 output: ./results/
