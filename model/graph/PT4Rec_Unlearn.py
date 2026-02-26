@@ -8,18 +8,20 @@ from base.graph_recommender import GraphRecommender
 from util.conf import OptionConf
 from util.sampler import next_batch_pairwise
 from base.torch_interface import TorchGraphInterface
-from util.loss_torch import bpr_loss, l2_reg_loss
+from util.loss_torch import bpr_loss, l2_reg_loss, InfoNCE
+from data.augmentor import GraphAugmentor
 from torchnmf.nmf import NMF
 import numpy as np
 from model.graph.XSimGCL import XSimGCL_Encoder
 from model.graph.SimGCL import SimGCL_Encoder
 
 
-class PT4Rec_Unlearn(GraphRecommender):
+# 重写prompts生成方式 train和save
+class PT4Rec(GraphRecommender):
     def __init__(self, conf, training_set, test_set):
-        super(PT4Rec_Unlearn, self).__init__(conf, training_set, test_set)
+        super(PT4Rec, self).__init__(conf, training_set, test_set)
 
-        args = OptionConf(self.config['PT4Rec_Unlearn'])
+        args = OptionConf(self.config['PT4Rec'])
         self.n_layers = int(args['-n_layer'])
         temp = float(args['-temp'])
         prompt_size = int(args['-prompt_size'])
@@ -49,12 +51,16 @@ class PT4Rec_Unlearn(GraphRecommender):
         self.user_matrix, self.Item_matrix = self._adjacency_matrix_factorization()
         self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.data.norm_adj).cuda()
 
-        self.unlearn_pairs = []
-        
-        self.cached_base_user_emb = None
-        self.cached_base_item_emb = None
-
     def XSimGCL_pre_train(self):
+        # 若已有预训练模型，则直接加载
+        # try:
+        #     self.model.load_state_dict(torch.load('./pretrained_model/XSimGCL_Douban_pretrain_20.pt'))
+        #     print('############## Pre-Training Phase ##############')
+        #     print('Load pretrained model successfully!')
+        #     return
+        # except:
+        #     print('No pretrained model, start pre-training...')
+
         pre_trained_model = self.model.cuda()
         optimizer = torch.optim.Adam(pre_trained_model.parameters(), lr=self.lRate)
 
@@ -65,13 +71,18 @@ class PT4Rec_Unlearn(GraphRecommender):
                 rec_user_emb, rec_item_emb, cl_user_emb, cl_item_emb  = pre_trained_model(True)
                 cl_loss = pre_trained_model.cal_cl_loss([user_idx,pos_idx],rec_user_emb,cl_user_emb,rec_item_emb,cl_item_emb)
                 batch_loss =  cl_loss
+                # Backward and optimize
                 optimizer.zero_grad()
                 batch_loss.backward()
                 optimizer.step()
                 if n % 100==0:
                     print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
+        # save pre-trained model
+        # torch.save(pre_trained_model.state_dict(), './pretrained_model/XSimGCL_Douban_pretrain_20.pt')         
+
     def SimGCL_pre_train(self):
+        # 若已有预训练模型，则直接加载
         try:
             self.model.load_state_dict(torch.load('./pretrained_model/SimGCL_douban_pretrain_20.pt'))
             print('############## Pre-Training Phase ##############')
@@ -89,60 +100,46 @@ class PT4Rec_Unlearn(GraphRecommender):
                 user_idx, pos_idx, neg_idx = batch
                 cl_loss = pre_trained_model.cal_cl_loss([user_idx,pos_idx])
                 batch_loss =  cl_loss
+                # Backward and optimize
                 optimizer.zero_grad()
                 batch_loss.backward()
                 optimizer.step()
                 if n % 100==0:
                     print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
+        # save pre-trained model
         torch.save(pre_trained_model.state_dict(), './pretrained_model/SimGCL_gowalla_pretrain_20.pt')    
 
     def _csr_to_pytorch_dense(self, csr):
         array = csr.toarray()
         dense = torch.Tensor(array)
         return dense.cuda()
-    
-    def request_unlearning(self, user_id, item_id):
-        try:
-            if user_id in self.data.user and item_id in self.data.item:
-                u_idx = self.data.user[user_id]
-                i_idx = self.data.item[item_id]
-                self.unlearn_pairs.append((u_idx, i_idx))
-                print(f"Unlearning requested for user {user_id} and item {item_id}")
-                
-                if self.cached_base_user_emb is not None and self.cached_base_item_emb is not None:
-                    prompted_user_emb, _ = self.generate_prompts(self.cached_base_user_emb, self.cached_base_item_emb)
-                    self.user_emb = prompted_user_emb
-                    print(f"User embedding updated instantly for user {user_id}.")
-                else:
-                    print("Warning: Base embeddings not cached yet. Unlearning will take effect in next training loop/evaluation.")
-            else:
-                print(f"User {user_id} or Item {item_id} not found.")
-        except Exception as e:
-            print(f"Unlearning failed: {e}")
 
-    def user_historical_records(self, item_emb):
+    def user_historical_records(self, item_emb):    # 用户的历史记录 根据所有选择过该用户的商品的embedding
         user_profiles = torch.mm(self.interaction_mat, item_emb)
-        
-        if len(self.unlearn_pairs) > 0:
-            for u_idx, i_idx in self.unlearn_pairs:
-                if u_idx < user_profiles.shape[0] and i_idx < item_emb.shape[0]:
-                    user_profiles[u_idx] = user_profiles[u_idx] - item_emb[i_idx]
-        
         return user_profiles
 
-    def _adjacency_matrix_factorization(self):
+    def _adjacency_matrix_factorization(self): # 邻接矩阵分解
         adjacency_matrix = self.data.interaction_mat
         adjacency_matrix = adjacency_matrix.toarray()
         adjacency_matrix = torch.Tensor(adjacency_matrix).cuda().t()
 
         print('######### Adjacency Matrix Factorization #############')
-        nmf = NMF(Vshape=adjacency_matrix.shape, rank=self.emb_size).cuda()
+        nmf = NMF(Vshape=adjacency_matrix.shape, rank=self.emb_size).cuda() # torch
+        # user_profiles = torch.Tensor(nmf.W).cuda()
+        # item_profiles = torch.Tensor(nmf.H).cuda()
         user_profiles = nmf.W
         item_profiles = nmf.H
         return user_profiles, item_profiles
 
-    def _high_order_relations(self, item_emb, user_emb):
+    def _high_order_relations(self, item_emb, user_emb):  # 高阶关系
+        # small dataset
+        # emb = torch.cat((user_emb, item_emb), 0)
+        # inputs = torch.sparse.mm(self.ui_high_order, emb)
+        # inputs = inputs[:self.data.user_num, :]
+        # return inputs
+
+        # big dataset Ciao
         ego_embeddings = torch.cat((user_emb, item_emb), 0)
         all_embeddings = [ego_embeddings]
         for k in range(self.n_layers):
@@ -172,36 +169,41 @@ class PT4Rec_Unlearn(GraphRecommender):
                 prompted_user_emb, prompted_item_emb = self.generate_prompts(user_emb, item_emb)
 
                 user_idx, pos_idx, neg_idx = batch
+                # rec_user_emb, rec_item_emb = model()
                 rec_user_emb = prompted_user_emb
                 rec_item_emb = prompted_item_emb
 
                 user_emb, pos_item_emb, neg_item_emb = rec_user_emb[user_idx], rec_item_emb[pos_idx], rec_item_emb[neg_idx]
                 rec_loss = bpr_loss(user_emb, pos_item_emb, neg_item_emb)
 
+                # 第二阶段 不继续训练对比学习权重
                 batch_loss =  rec_loss + l2_reg_loss(self.reg, user_emb, pos_item_emb)
+                # Backward and optimize
                 
                 batch_loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
 
                 if n % 100==0:
-                    print('training:', epoch + 1, 'batch', n, 'rec_loss:', rec_loss.item())
-            
+                    print('training:', epoch + 1, 'batch', n, 'rec_loss:', rec_loss.item())#, 'cl_loss', cl_loss.item())
             with torch.no_grad():
-                self.cached_base_user_emb, self.cached_base_item_emb = self.model()
-                
-                prompted_user_emb, prompted_item_emb = self.generate_prompts(self.cached_base_user_emb, self.cached_base_item_emb)
-                self.best_user_emb = prompted_user_emb
-                self.best_item_emb = prompted_item_emb
-                
+                user_emb, self.item_emb = self.model()
+                prompted_user_emb, prompted_item_emb = self.generate_prompts(user_emb, self.item_emb)
                 self.user_emb = prompted_user_emb
                 self.item_emb = prompted_item_emb
-                
             if epoch%5==0:
                 metric = self.fast_evaluation(epoch)
                 metrics.append(metric)
-        
         self.user_emb, self.item_emb = self.best_user_emb, self.best_item_emb
+        # metrics 存为json文件
+        # with open('CPMP'+ str(self.maxPreEpoch) +'_metrics.json', 'w') as f:
+        #     json.dump(metrics, f)
+
+        #### 计算注意力权重并保存
+        # alpha = torch.matmul(self.user_emb, self.user_attention.A)
+        # alpha = F.softmax(alpha/8, dim=1)
+        # alpha = alpha.cpu().detach().numpy()
+        # np.save('XSimGCL_Douban_attention_weight.npy', alpha)
 
     def save(self):
         with torch.no_grad():
@@ -227,7 +229,7 @@ class PT4Rec_Unlearn(GraphRecommender):
                 u += 1
             if self.user_prompt_R:
                 user_prompts.append(self.user_prompt_generator[u](self._high_order_relations(item_emb, user_emb)[0]))
-            
+            # 注意力
             user_prompt = torch.stack(user_prompts, dim=1)
             prompt = self.user_attention(user_prompt, user_emb)
             prompted_user_emb = prompt * user_emb
@@ -242,14 +244,24 @@ class Attention(nn.Module):
         super(Attention, self).__init__()
         initializer = nn.init.xavier_uniform_
         self.prompt_num = prompt_num
-        self.A = nn.Parameter(initializer(torch.empty(prompt_size, prompt_num)))
+        self.A_pos = nn.Parameter(initializer(torch.empty(prompt_size, prompt_num)))
+        self.A_neg = nn.Parameter(initializer(torch.empty(prompt_size, prompt_num)))
 
     def forward(self, prompt_base, embeddings):
-        alpha = torch.matmul(embeddings, self.A)
-        alpha = F.softmax(alpha, dim=1)
-        alpha = alpha.unsqueeze(1)
-        prompt = torch.bmm(alpha, prompt_base)
-        prompt = prompt.squeeze(1)
+        # Positive Attention
+        score_pos = torch.matmul(embeddings, self.A_pos)
+        alpha_pos = F.softmax(score_pos, dim=1)
+        
+        # Negative Attention (Adversarial)
+        score_neg = torch.matmul(embeddings, self.A_neg)
+        alpha_neg = F.softmax(score_neg, dim=1)
+        
+        # Combined Attention: alpha \in (-1, 1)
+        alpha = alpha_pos - alpha_neg
+        
+        alpha = alpha.unsqueeze(1)  # alpha.shape = [batch_size, 1, prompt_num]
+        prompt = torch.bmm(alpha, prompt_base)  # prompt.shape = [batch_size, 1, prompt_size]
+        prompt = prompt.squeeze(1)  # prompt.shape = [batch_size, prompt_size]
         return prompt
 
     
@@ -265,3 +277,4 @@ class Prompts_Generator(nn.Module):
         prompts = self.activation(prompts)
         
         return prompts
+    

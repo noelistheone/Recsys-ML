@@ -8,11 +8,11 @@ model:
 item.ranking.topN: [10,20]
 
 embedding.size: 64
-max.epoch: 2
+max.epoch: 100
 batch.size: 2048
 learning.rate: 0.001
 reg.lambda: 0.0001
-num.max.preepoch: 2
+num.max.preepoch: 20
 
 PT4Rec_Unlearn: -n_layer 2  -temp 0.2 -prompt_size 64 -user_prompt_num 3  -pretrain_model SimGCL
 
