@@ -1,0 +1,13 @@
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - ### model configuration ###
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - training.set=./dataset/yelp2018/train.txt
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - test.set=./dataset/yelp2018/test.txt
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - model={'name': 'PT4Rec_Pop', 'type': 'graph'}
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - item.ranking.topN=[10, 20]
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - embedding.size=64
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - max.epoch=100
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - batch.size=2048
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - learning.rate=0.001
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - reg.lambda=0.0001
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - num.max.preepoch=20
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - PT4Rec_Pop=-n_layer 2 -temp 0.2 -prompt_size 64 -user_prompt_num 3 -pretrain_model SimGCL -gamma 0.1 -top_k 100
+2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - output=./results/
