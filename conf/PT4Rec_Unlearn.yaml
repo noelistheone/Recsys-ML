@@ -1,5 +1,5 @@
-training.set: ./dataset/douban-book/train.txt
-test.set: ./dataset/douban-book/test.txt
+training.set: ./dataset/yelp2018/train.txt
+test.set: ./dataset/yelp2018/test.txt
 
 model:
   name: PT4Rec_Unlearn

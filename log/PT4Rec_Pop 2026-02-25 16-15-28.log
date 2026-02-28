@@ -11,3 +11,5 @@
 2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - num.max.preepoch=20
 2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - PT4Rec_Pop=-n_layer 2 -temp 0.2 -prompt_size 64 -user_prompt_num 3 -pretrain_model SimGCL -gamma 0.1 -top_k 100
 2026-02-25 16:15:33,066 - PT4Rec_Pop - INFO - output=./results/
+2026-02-25 22:02:02,700 - PT4Rec_Pop - INFO - ###Evaluation Results###
+2026-02-25 22:02:02,701 - PT4Rec_Pop - INFO - ['Top 10\n', 'Hit Ratio:0.03452\n', 'Precision:0.03533\n', 'Recall:0.03933\n', 'NDCG:0.04492\n', 'Top 20\n', 'Hit Ratio:0.05941\n', 'Precision:0.03041\n', 'Recall:0.06724\n', 'NDCG:0.05508\n']
