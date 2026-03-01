@@ -56,6 +56,12 @@ class PT4Rec_Adv(GraphRecommender):
         self.interaction_mat = TorchGraphInterface.convert_sparse_mat_to_tensor(self.data.interaction_mat).cuda()
         self.user_matrix, self.Item_matrix = self._adjacency_matrix_factorization()
         self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.data.norm_adj).cuda()
+        
+        # 尝试从 config 的 'training.set' 路径中提取数据集名称，例如 ./dataset/yelp2018/train.txt -> yelp2018
+        try:
+            self.dataset_name = self.config['training.set'].split('/')[-2]
+        except:
+            self.dataset_name = 'unknown'
 
     def XSimGCL_pre_train(self):
         # 若已有预训练模型，则直接加载
@@ -90,7 +96,7 @@ class PT4Rec_Adv(GraphRecommender):
     def SimGCL_pre_train(self):
         # 若已有预训练模型，则直接加载
         try:
-            self.model.load_state_dict(torch.load('./pretrained_model/SimGCL_{}_pretrain_20.pt'.format(self.data.name)))
+            self.model.load_state_dict(torch.load('./pretrained_model/SimGCL_{}_pretrain_20.pt'.format(self.dataset_name)))
             print('############## Pre-Training Phase ##############')
             print('Load pretrained model successfully!')
             return
@@ -114,7 +120,7 @@ class PT4Rec_Adv(GraphRecommender):
                     print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
         # save pre-trained model
-        torch.save(pre_trained_model.state_dict(), './pretrained_model/SimGCL_{}_pretrain_20.pt'.format(self.data.name))    
+        torch.save(pre_trained_model.state_dict(), './pretrained_model/SimGCL_{}_pretrain_20.pt'.format(self.dataset_name))    
 
     def _csr_to_pytorch_dense(self, csr):
         array = csr.toarray()
