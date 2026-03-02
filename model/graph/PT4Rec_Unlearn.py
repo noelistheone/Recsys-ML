@@ -51,15 +51,20 @@ class PT4Rec(GraphRecommender):
         self.user_matrix, self.Item_matrix = self._adjacency_matrix_factorization()
         self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.data.norm_adj).cuda()
 
+        try:
+            self.dataset_name = self.config['training.set'].split('/')[-2]
+        except:
+            self.dataset_name = 'unknown'
+
     def XSimGCL_pre_train(self):
         # 若已有预训练模型，则直接加载
-        # try:
-        #     self.model.load_state_dict(torch.load('./pretrained_model/XSimGCL_Douban_pretrain_20.pt'))
-        #     print('############## Pre-Training Phase ##############')
-        #     print('Load pretrained model successfully!')
-        #     return
-        # except:
-        #     print('No pretrained model, start pre-training...')
+        try:
+            self.model.load_state_dict(torch.load('./pretrained_model/{}_{}_pretrain_20.pt'.format(self.pretrain_model, self.dataset_name)))
+            print('############## Pre-Training Phase ##############')
+            print('Load pretrained model successfully!')
+            return
+        except:
+            print('No pretrained model, start pre-training...')
 
         pre_trained_model = self.model.cuda()
         optimizer = torch.optim.Adam(pre_trained_model.parameters(), lr=self.lRate)
@@ -79,12 +84,12 @@ class PT4Rec(GraphRecommender):
                     print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
         # save pre-trained model
-        # torch.save(pre_trained_model.state_dict(), './pretrained_model/XSimGCL_Douban_pretrain_20.pt')         
+        torch.save(pre_trained_model.state_dict(), './pretrained_model/{}_{}_pretrain_20.pt'.format(self.pretrain_model, self.dataset_name))        
 
     def SimGCL_pre_train(self):
         # 若已有预训练模型，则直接加载
         try:
-            self.model.load_state_dict(torch.load('./pretrained_model/SimGCL_douban_pretrain_20.pt'))
+            self.model.load_state_dict(torch.load('./pretrained_model/{}_{}_pretrain_20.pt'.format(self.pretrain_model, self.dataset_name)))
             print('############## Pre-Training Phase ##############')
             print('Load pretrained model successfully!')
             return
@@ -108,7 +113,7 @@ class PT4Rec(GraphRecommender):
                     print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
         # save pre-trained model
-        torch.save(pre_trained_model.state_dict(), './pretrained_model/SimGCL_gowalla_pretrain_20.pt')    
+        torch.save(pre_trained_model.state_dict(), './pretrained_model/{}_{}_pretrain_20.pt'.format(self.pretrain_model, self.dataset_name))
 
     def _csr_to_pytorch_dense(self, csr):
         array = csr.toarray()
@@ -244,20 +249,41 @@ class Attention(nn.Module):
         super(Attention, self).__init__()
         initializer = nn.init.xavier_uniform_
         self.prompt_num = prompt_num
+        self.prompt_size = prompt_size
+        
+        # 1. 独立语义空间投影：将特征分别投影到“保留特征”和“抑制特征”空间
+        self.W_pos = nn.Linear(prompt_size, prompt_size)
+        self.W_neg = nn.Linear(prompt_size, prompt_size)
+        
         self.A_pos = nn.Parameter(initializer(torch.empty(prompt_size, prompt_num)))
         self.A_neg = nn.Parameter(initializer(torch.empty(prompt_size, prompt_num)))
+        
+        # 2. 个性化遗忘门控：动态决定每个用户需要的 unlearning 的程度
+        self.unlearn_gate = nn.Sequential(
+            nn.Linear(prompt_size, prompt_size // 2),
+            nn.ReLU(),
+            nn.Linear(prompt_size // 2, 1),
+            nn.Sigmoid()
+        )
 
     def forward(self, prompt_base, embeddings):
-        # Positive Attention
-        score_pos = torch.matmul(embeddings, self.A_pos)
+        # 映射特征至专门的正负语义查询空间
+        q_pos = self.W_pos(embeddings)
+        q_neg = self.W_neg(embeddings)
+        
+        # Positive Attention (使用缩放点积防止 Softmax 梯度消失问题)
+        score_pos = torch.matmul(q_pos, self.A_pos) / (self.prompt_size ** 0.5)
         alpha_pos = F.softmax(score_pos, dim=1)
         
-        # Negative Attention (Adversarial)
-        score_neg = torch.matmul(embeddings, self.A_neg)
+        # Negative Attention (Adversarial) 同样添加缩放
+        score_neg = torch.matmul(q_neg, self.A_neg) / (self.prompt_size ** 0.5)
         alpha_neg = F.softmax(score_neg, dim=1)
         
-        # Combined Attention: alpha \in (-1, 1)
-        alpha = alpha_pos - alpha_neg
+        # 计算该用户特有的遗忘强度权值 (gate.shape = [batch_size, 1])
+        gate = self.unlearn_gate(embeddings)
+        
+        # Combined Attention: alpha 取值更为柔性自适应
+        alpha = alpha_pos - gate * alpha_neg
         
         alpha = alpha.unsqueeze(1)  # alpha.shape = [batch_size, 1, prompt_num]
         prompt = torch.bmm(alpha, prompt_base)  # prompt.shape = [batch_size, 1, prompt_size]
