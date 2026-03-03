@@ -1,0 +1,34 @@
+training.set: ./dataset/ml-1M/train.txt
+test.set: ./dataset/ml-1M/test.txt
+
+model:
+  name: PT4Rec
+  type: graph
+
+item.ranking.topN: [10,20]
+
+embedding.size: 64
+max.epoch: 100
+batch.size: 2048
+learning.rate: 0.001
+reg.lambda: 0.0001
+num.max.preepoch: 20
+
+# PT4Rec Enhanced Configuration with All Performance Improvements
+PT4Rec: -n_layer 2 -temp 0.2 -prompt_size 64 -user_prompt_num 3 -pretrain_model SimGCL -simgcl_eps 0.1 -simgcl_n_layers 3 -dual_attention true -use_popularity true -pop_gamma 0.1 -pop_topk 100 -fusion_type multiply -warmup_epochs 10 -stage2_cl_weight 0.1 -prompt_dropout 0.1 -align_weight 0.02 -uniform_weight 0.01 -n_negs 4 -neg_mixup true
+
+# Parameter Explanations:
+# -dual_attention true: Enables adversarial attention allowing negative weights
+# -use_popularity true: Enables popularity debiasing
+# -pop_gamma 0.1: Weight for popularity bias subtraction
+# -pop_topk 100: Number of top popular items to consider
+# -fusion_type multiply: Element-wise multiplication (use 'mlp' for deep fusion)
+# -warmup_epochs 10: Number of warm-up epochs before adding auxiliary losses
+# -stage2_cl_weight 0.1: Weight for contrastive loss in downstream training
+# -prompt_dropout 0.1: Dropout rate for prompt generators
+# -align_weight 0.02: Weight for alignment loss
+# -uniform_weight 0.01: Weight for uniformity loss
+# -n_negs 4: Number of negative samples per positive
+# -neg_mixup true: Apply mixup to hard negatives
+
+output: ./results/

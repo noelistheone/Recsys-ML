@@ -1,4 +1,5 @@
 import json
+import os
 from turtle import forward
 import torch
 torch.manual_seed(12345)
@@ -119,8 +120,12 @@ class PT4Rec_Adv(GraphRecommender):
                 if n % 100==0:
                     print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
+        parent_dir = './pretrained_model'
+        model_name = f'SimGCL_{self.dataset_name}_pretrain_20.pt'
+        os.makedirs(parent_dir, exist_ok=True)
+
         # save pre-trained model
-        torch.save(pre_trained_model.state_dict(), './pretrained_model/SimGCL_{}_pretrain_20.pt'.format(self.dataset_name))    
+        torch.save(pre_trained_model.state_dict(), os.path.join(parent_dir, model_name))    
 
     def _csr_to_pytorch_dense(self, csr):
         array = csr.toarray()

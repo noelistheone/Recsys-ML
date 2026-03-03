@@ -14,6 +14,7 @@ from torchnmf.nmf import NMF
 import numpy as np
 from model.graph.XSimGCL import XSimGCL_Encoder
 from model.graph.SimGCL import SimGCL_Encoder
+import os
 
 
 # 重写prompts生成方式 train和save
@@ -31,6 +32,14 @@ class PT4Rec(GraphRecommender):
             self.maxPreEpoch = int(self.config['num.max.preepoch'])
         else:
             self.maxPreEpoch = 0
+
+        # Derive pretrained model path from config
+        dataset_name = os.path.basename(os.path.dirname(self.config['training.set']))
+        if self.config.contain('pretrain_model_path'):
+            self.pretrained_model_path = self.config['pretrain_model_path']
+        else:
+            self.pretrained_model_path = f'./pretrained_model/{self.pretrain_model}_{dataset_name}_pretrain_{self.maxPreEpoch}.pt'
+        print(f'Pretrained model path: {self.pretrained_model_path}')
 
         self.user_prompt_H = True
         self.user_prompt_M = True
@@ -51,64 +60,38 @@ class PT4Rec(GraphRecommender):
         self.user_matrix, self.Item_matrix = self._adjacency_matrix_factorization()
         self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.data.norm_adj).cuda()
 
-    def XSimGCL_pre_train(self):
-        # 若已有预训练模型，则直接加载
-        # try:
-        #     self.model.load_state_dict(torch.load('./pretrained_model/XSimGCL_Douban_pretrain_20.pt'))
-        #     print('############## Pre-Training Phase ##############')
-        #     print('Load pretrained model successfully!')
-        #     return
-        # except:
-        #     print('No pretrained model, start pre-training...')
-
-        pre_trained_model = self.model.cuda()
-        optimizer = torch.optim.Adam(pre_trained_model.parameters(), lr=self.lRate)
-
+    def pre_train(self):
+        """Unified pre-training. Loads from derived path if exists, else trains and saves."""
         print('############## Pre-Training Phase ##############')
-        for epoch in range(self.maxPreEpoch):
-            for n, batch in enumerate(next_batch_pairwise(self.data, self.batch_size)):
-                user_idx, pos_idx, neg_idx = batch
-                rec_user_emb, rec_item_emb, cl_user_emb, cl_item_emb  = pre_trained_model(True)
-                cl_loss = pre_trained_model.cal_cl_loss([user_idx,pos_idx],rec_user_emb,cl_user_emb,rec_item_emb,cl_item_emb)
-                batch_loss =  cl_loss
-                # Backward and optimize
-                optimizer.zero_grad()
-                batch_loss.backward()
-                optimizer.step()
-                if n % 100==0:
-                    print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
-        # save pre-trained model
-        # torch.save(pre_trained_model.state_dict(), './pretrained_model/XSimGCL_Douban_pretrain_20.pt')         
-
-    def SimGCL_pre_train(self):
-        # 若已有预训练模型，则直接加载
-        try:
-            self.model.load_state_dict(torch.load('./pretrained_model/SimGCL_douban_pretrain_20.pt'))
-            print('############## Pre-Training Phase ##############')
-            print('Load pretrained model successfully!')
+        import os
+        if os.path.exists(self.pretrained_model_path):
+            self.model.load_state_dict(torch.load(self.pretrained_model_path))
+            print(f'Loaded pretrained model from {self.pretrained_model_path}')
             return
-        except:
-            print('No pretrained model, start pre-training...')
+        else:
+            print(f'No pretrained model found at {self.pretrained_model_path}, start pre-training...')
 
         pre_trained_model = self.model.cuda()
         optimizer = torch.optim.Adam(pre_trained_model.parameters(), lr=self.lRate)
 
-        print('############## Pre-Training Phase ##############')
         for epoch in range(self.maxPreEpoch):
             for n, batch in enumerate(next_batch_pairwise(self.data, self.batch_size)):
                 user_idx, pos_idx, neg_idx = batch
-                cl_loss = pre_trained_model.cal_cl_loss([user_idx,pos_idx])
-                batch_loss =  cl_loss
-                # Backward and optimize
+                if self.pretrain_model == 'XSimGCL':
+                    rec_user_emb, rec_item_emb, cl_user_emb, cl_item_emb = pre_trained_model(True)
+                    cl_loss = pre_trained_model.cal_cl_loss([user_idx, pos_idx], rec_user_emb, cl_user_emb, rec_item_emb, cl_item_emb)
+                else:  # SimGCL
+                    cl_loss = pre_trained_model.cal_cl_loss([user_idx, pos_idx])
                 optimizer.zero_grad()
-                batch_loss.backward()
+                cl_loss.backward()
                 optimizer.step()
-                if n % 100==0:
+                if n % 100 == 0:
                     print('pre-training:', epoch + 1, 'batch', n, 'cl_loss', cl_loss.item())
 
-        # save pre-trained model
-        torch.save(pre_trained_model.state_dict(), './pretrained_model/SimGCL_gowalla_pretrain_20.pt')    
+        os.makedirs(os.path.dirname(self.pretrained_model_path), exist_ok=True)
+        torch.save(pre_trained_model.state_dict(), self.pretrained_model_path)
+        print(f'Saved pretrained model to {self.pretrained_model_path}')
 
     def _csr_to_pytorch_dense(self, csr):
         array = csr.toarray()
@@ -151,10 +134,7 @@ class PT4Rec(GraphRecommender):
         return user_profiles, item_profiles
 
     def train(self):
-        if self.pretrain_model == 'XSimGCL':
-            self.XSimGCL_pre_train()
-        elif self.pretrain_model == 'SimGCL':
-            self.SimGCL_pre_train()
+        self.pre_train()
 
         model = self.model.cuda()
         params = list(model.parameters()) + list(self.user_attention.parameters()) + list(self.user_prompt_generator[0].parameters()) + list(self.user_prompt_generator[1].parameters()) + list(self.user_prompt_generator[2].parameters())
